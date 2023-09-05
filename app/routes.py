@@ -1,24 +1,34 @@
+import threading
+from multiprocessing import Process
+
+import redis
 from flask import Blueprint, request, jsonify
 from marshmallow import ValidationError
 
 import crud
-from models import Student, db
 from schemas import StudentSchema, StudentCredentials
-from service import validate_image, save_image , generate_face_embedding , save_face_embedding , compare_embeddings,face_emb_retrieval
+from service import save_image, generate_face_embedding, save_face_embedding, compare_embeddings, \
+    face_emb_retrieval, validate_and_save_face, is_cheating
 
 
+
+from _pickle import dumps,loads
 bp = Blueprint('api', __name__)
+
+
 
 @bp.route('/auth',methods=['GET'])
 def authenticate():
+
     email = request.form.get('email')
     password = request.form.get('password')
     image_file = request.files.get('image')
-
     image_path = save_image(image_file)
 
-    if not validate_image(image_path):
-        return jsonify("please provide a right picture!"),400
+    try:
+        image_path = validate_and_save_face(image_path)
+    except Exception as e:
+        return jsonify(e.messages), 400
 
     emb_auth = generate_face_embedding(image_path)
 
@@ -34,9 +44,14 @@ def authenticate():
     except ValidationError as error:
         return jsonify(error.messages), 400
 
-    emb_original = face_emb_retrieval(credentials_data)
-    if(compare_embeddings(emb_auth,emb_original)<0.75):
+    emb_original,emb_path = face_emb_retrieval(credentials_data)
+    score = compare_embeddings(emb_auth,emb_original)
+    print(f'score of face comparison for login is {score}')
+    if(score<0.8):
         return jsonify("Only the person could pass his exam"),403
+
+    store = redis.Redis(host='localhost', port=6379, db=0)
+    store.set("user_emb_path",emb_path)
 
     return jsonify("Authenticated"),200
 
@@ -45,19 +60,21 @@ def authenticate():
 
 @bp.route('/student', methods=['POST'])
 def create_student():
-
     firstname = request.form.get('firstname')
     lastname = request.form.get('lastname')
     email = request.form.get('email')
     password = request.form.get('password')
     id_card = request.form.get('id_card')
     image_file = request.files.get('image')
-
+    print(f'image_file = {image_file}')
 
     image_path = save_image(image_file)
 
-    if not validate_image(image_path):
-        return jsonify("please provide a right picture!"),400
+    try:
+        image_path = validate_and_save_face(image_path)
+    except Exception as e:
+        return jsonify(e.messages), 400
+
 
     emb = generate_face_embedding(image_path)
     face_emb_path =save_face_embedding(emb)
@@ -73,9 +90,10 @@ def create_student():
         "face_emb_path" : face_emb_path
     }
 
-    student_schema = StudentSchema()
     try:
-        # Validate the data using the schema instance
+        student_schema = StudentSchema()
+
+    # Validate the data using the schema instance
         validated_data = student_schema.load(student_req)
     except ValidationError as error:
         return jsonify(error.messages), 400
@@ -84,6 +102,15 @@ def create_student():
 
     crud.save_student(student_req,face_emb_path)
     return jsonify({'message': 'Student created successfully'}), 201
+@bp.route('/monitor', methods=['POST'])
+def take_exam():
+
+    duration = request.form.get('exam_duration')
+
+    process = Process(target=is_cheating, args=(duration,))
+    process.start()
+
+    return jsonify({'message': 'Exam Monitoring started!'}), 201
 
 
 @bp.route('/hello', methods=['GET'])
