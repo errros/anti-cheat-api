@@ -1,25 +1,19 @@
-
 import os
 import uuid
 from enum import Enum
-import redis as redis
-
 
 import cv2
 import numpy as np
+import redis as redis
 import torch
-from scipy.spatial.distance import cosine
 from facenet_pytorch import InceptionResnetV1
-from torchvision.transforms import functional as F
-
 from mtcnn import MTCNN
-from PIL import Image
+from scipy.spatial.distance import cosine
+from torchvision.transforms import functional as F
 from werkzeug.utils import secure_filename
 
 import crud
-from schemas import StudentCredentials
 from settings import app
-
 
 store = redis.Redis(host='localhost', port=6379, db=0)
 
@@ -41,10 +35,6 @@ class ExamViolations(Enum):
     MOBILE_USAGE = "You appear to have used a phone!"
 
 
-
-
-
-
 def is_cheating(duration):
     frame_counter = 1
     exam_taker_emb_path = store.get("user_emb_path")
@@ -62,9 +52,9 @@ def is_cheating(duration):
             detector = MTCNN()
             # Detect faces in the image
             faces = detector.detect_faces(image)
-            if len(faces)==0:
+            if len(faces) == 0:
                 print(ExamViolations.NOT_PRESENT.name)
-            elif len(faces)>1:
+            elif len(faces) > 1:
                 print(ExamViolations.MORE_PEOPLE.name)
             else:
                 # Extract face only and turn it into grayscale image
@@ -75,18 +65,19 @@ def is_cheating(duration):
                 # Save the grayscale detected face image
                 save_path = os.path.join(app.config["TMP_PATH"], f'detected_face_gray_{frame_counter}.jpg')
                 cv2.imwrite(save_path, gray_face_image)
-                frame_counter = frame_counter+1
+                frame_counter = frame_counter + 1
 
                 face_emb = generate_face_embedding(save_path)
 
-                score = compare_embeddings(face_emb,exam_taker_emb)
+                score = compare_embeddings(face_emb, exam_taker_emb)
 
-                if(score<0.8):
-                    print(ExamViolations.NOT_SAME_PERSON.name , f" with score of {score}")
+                if (score < 0.8):
+                    print(ExamViolations.NOT_SAME_PERSON.name, f" with score of {score}")
                 else:
                     phone_used_detected, detection_confidence = detect_phone_used(image)
                     if phone_used_detected:
                         print(ExamViolations.MOBILE_USAGE.name)
+
 
 def detect_phone_used(image):
     # Get the height and width of the input image
@@ -125,8 +116,10 @@ def validate_and_save_face(image_path):
     image = cv2.cvtColor(cv2.imread(image_path), cv2.COLOR_BGR2RGB)
     detector = MTCNN()
     faces = detector.detect_faces(image)
+
     if len(faces) > 1 or len(faces) == 0 or faces[0]['confidence'] < 0.97:
-        print(f'confidence on face detection is : {faces[0]["confidence"]}')
+        if len(faces) > 0:
+            print(f'confidence on face detection is : {faces[0]["confidence"]}')
         raise RuntimeError("Please provide a clear picture of yourself only!")
 
     face_bbox = faces[0]['box']  # Bounding box of the detected face
@@ -148,10 +141,10 @@ def save_image(image_file):
         image_file.save(save_path)
         return save_path
 
+
 def allowed_file(filename):
     allowed_extensions = {'png', 'jpg', 'jpeg', 'gif'}
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in allowed_extensions
-
 
 
 def generate_face_embedding(image_path):
@@ -168,6 +161,7 @@ def generate_face_embedding(image_path):
     with torch.no_grad():
         return resnet(tensor_image)
 
+
 def save_face_embedding(embedding):
     emb_filename = str(uuid.uuid4()) + '.npy'
     # Save the embedding as an .npy file
@@ -175,19 +169,17 @@ def save_face_embedding(embedding):
     np.save(emb_file_path, embedding.detach().numpy())
     return emb_file_path
 
+
 def face_emb_retrieval(credentials):
     student = crud.get_student_by_credentials(credentials)
     if student is None:
         raise RuntimeError("there's no student with such credentials!")
     path = student.face_emb_path
-    return np.load(path),path
-
+    return np.load(path), path
 
 
 def compare_embeddings(embedding1, embedding2):
-
     tensor1 = torch.tensor(embedding1[0])
     tensor2 = torch.tensor(embedding2[0])
     similarity = 1 - cosine(tensor1.detach().numpy(), tensor2.detach().numpy())
     return similarity
-

@@ -1,8 +1,10 @@
+import time
+
 import requests
 import streamlit as st
-from marshmallow import ValidationError, Schema, fields,validate
-from streamlit_extras.switch_page_button import switch_page
 from PIL import Image
+from marshmallow import ValidationError, Schema, fields, validate
+from streamlit_extras.switch_page_button import switch_page
 from streamlit_option_menu import option_menu
 
 
@@ -14,7 +16,7 @@ class StudentInfosSchema(Schema):
     id_card = fields.String(required=True)
 
 
-def validate_form(firstname,lastname,email,password,id_card):
+def validate_form(firstname, lastname, email, password, id_card, picture):
     # Validate the form student_schema=
     student_form = {
         'firstname': firstname,
@@ -26,7 +28,8 @@ def validate_form(firstname,lastname,email,password,id_card):
 
     student_schema = StudentInfosSchema()
     validated_data = student_schema.load(student_form)
-
+    if picture is None:
+        raise ValidationError("Take a picture of yourself!")
 
 
 def resize_image(image, new_size=(300, 300)):
@@ -34,7 +37,7 @@ def resize_image(image, new_size=(300, 300)):
     return resized_image
 
 
-#st.set_page_config(page_title="Exam",initial_sidebar_state="collapsed")
+# st.set_page_config(page_title="Exam",initial_sidebar_state="collapsed")
 
 def register():
     st.title("Student Registration")
@@ -53,7 +56,8 @@ def register():
         if st.form_submit_button('Register', use_container_width=True, type="primary"):
             # Call the validation function and catch any validation error
             try:
-                validate_form(firstname, lastname, email, password, id_card)
+                validate_form(firstname, lastname, email, password, id_card, picture)
+
                 payload = {
                     'firstname': firstname,
                     'lastname': lastname,
@@ -68,14 +72,20 @@ def register():
                 }
 
                 response = requests.post('http://127.0.0.1:5000/api/student', data=payload, files=files)
-                alert.info(response.content)
+                if response.status_code == 201:
+                    alert.info(response.text)
+                    time.sleep(2)
+                    switch_page("login")
 
+                else:
+                    alert.error(
+                        "you failed registration if you have an account login instead , take a good clear picture of yourself , check the form again!")
 
-            except Exception as error:
+            except ValidationError as error:
                 alert.error(error)
-    if st.button(label="Login",key="green-button",use_container_width=True):
-        switch_page("login")
 
+    if st.button(label="Login", key="green-button", use_container_width=True):
+        switch_page("login")
 
 
 if __name__ == "__main__":

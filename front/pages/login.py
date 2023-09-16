@@ -1,6 +1,6 @@
 import requests
 import streamlit as st
-from marshmallow import ValidationError, Schema, fields,validate
+from marshmallow import ValidationError, Schema, fields, validate
 from streamlit_extras.switch_page_button import switch_page
 from streamlit_option_menu import option_menu
 
@@ -9,7 +9,8 @@ class CredentialsSchema(Schema):
     email = fields.Email(required=True)
     password = fields.String(required=True, validate=validate.Length(min=7))
 
-def validate_form(email,password):
+
+def validate_form(email, password, picture):
     # Validate the form student_schema=
     credentials_form = {
         'email': email,
@@ -18,7 +19,8 @@ def validate_form(email,password):
 
     credentials_schema = CredentialsSchema()
     validated_data = credentials_schema.load(credentials_form)
-
+    if picture is None:
+        raise ValidationError("Take a picture of yourself!")
 
 
 def login():
@@ -32,9 +34,10 @@ def login():
 
         # Use st.form_submit_button's on_click event handler
         if st.form_submit_button('Login', use_container_width=True, type="primary"):
+
             # Call the validation function and catch any validation error
             try:
-                validate_form(email, password)
+                validate_form(email, password, picture)
 
                 payload = {
                     'email': email,
@@ -46,16 +49,17 @@ def login():
                 }
 
                 response = requests.get('http://127.0.0.1:5000/api/auth', data=payload, files=files)
-                alert.info(response.content)
                 if response.status_code == 200:
                     switch_page("exam")
+                else:
+                    alert.error(response.text)
 
 
 
             except ValidationError as error:
                 alert.error(error)
 
-    if st.button(label="Register",key="green-button",use_container_width=True):
+    if st.button(label="Register", key="green-button", use_container_width=True):
         switch_page("registration")
 
 
@@ -65,12 +69,10 @@ if __name__ == "__main__":
                                icons=['house', 'play-circle', "house-add"], menu_icon="cast", default_index=1,
                                key="navbar")
 
-
         if selected == "Home":
             switch_page("home")
         elif selected == "Register":
             switch_page("registration")
-
 
         st.markdown("<style> ul {display: none;} </style>", unsafe_allow_html=True)
 

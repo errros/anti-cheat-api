@@ -1,4 +1,3 @@
-import threading
 from multiprocessing import Process
 
 import redis
@@ -10,16 +9,11 @@ from schemas import StudentSchema, StudentCredentials
 from service import save_image, generate_face_embedding, save_face_embedding, compare_embeddings, \
     face_emb_retrieval, validate_and_save_face, is_cheating
 
-
-
-from _pickle import dumps,loads
 bp = Blueprint('api', __name__)
 
 
-
-@bp.route('/auth',methods=['GET'])
+@bp.route('/auth', methods=['GET'])
 def authenticate():
-
     email = request.form.get('email')
     password = request.form.get('password')
     image_file = request.files.get('image')
@@ -28,7 +22,7 @@ def authenticate():
     try:
         image_path = validate_and_save_face(image_path)
     except Exception as e:
-        return jsonify(e.messages), 400
+        return jsonify("Failed authentifcation"), 400
 
     emb_auth = generate_face_embedding(image_path)
 
@@ -44,18 +38,20 @@ def authenticate():
     except ValidationError as error:
         return jsonify(error.messages), 400
 
-    emb_original,emb_path = face_emb_retrieval(credentials_data)
-    score = compare_embeddings(emb_auth,emb_original)
+    try:
+        emb_original, emb_path = face_emb_retrieval(credentials_data)
+    except RuntimeError as e:
+        return jsonify("there's no student with such credentials!"), 404
+
+    score = compare_embeddings(emb_auth, emb_original)
     print(f'score of face comparison for login is {score}')
-    if(score<0.8):
-        return jsonify("Only the person could pass his exam"),403
+    if (score < 0.8):
+        return jsonify("Only the person could pass his exam"), 403
 
     store = redis.Redis(host='localhost', port=6379, db=0)
-    store.set("user_emb_path",emb_path)
+    store.set("user_emb_path", emb_path)
 
-    return jsonify("Authenticated"),200
-
-
+    return jsonify("Authenticated"), 200
 
 
 @bp.route('/student', methods=['POST'])
@@ -75,10 +71,8 @@ def create_student():
     except Exception as e:
         return jsonify(e.messages), 400
 
-
     emb = generate_face_embedding(image_path)
-    face_emb_path =save_face_embedding(emb)
-
+    face_emb_path = save_face_embedding(emb)
 
     # Validate the form student_schema=
     student_req = {
@@ -87,24 +81,23 @@ def create_student():
         'email': email,
         'password': password,
         'id_card': id_card,
-        "face_emb_path" : face_emb_path
+        "face_emb_path": face_emb_path
     }
 
     try:
         student_schema = StudentSchema()
+        crud.save_student(student_req, face_emb_path)
 
-    # Validate the data using the schema instance
+        # Validate the data using the schema instance
         validated_data = student_schema.load(student_req)
     except ValidationError as error:
         return jsonify(error.messages), 400
 
-
-
-    crud.save_student(student_req,face_emb_path)
     return jsonify({'message': 'Student created successfully'}), 201
+
+
 @bp.route('/monitor', methods=['POST'])
 def take_exam():
-
     duration = request.form.get('exam_duration')
 
     process = Process(target=is_cheating, args=(duration,))
