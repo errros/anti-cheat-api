@@ -1,9 +1,13 @@
 import os
+import shutil
+import smtplib
 import uuid
+from email.message import EmailMessage
 from enum import Enum
 
 import cv2
 import numpy as np
+import pandas as pd
 import redis as redis
 import torch
 from facenet_pytorch import InceptionResnetV1
@@ -35,27 +39,31 @@ class ExamViolations(Enum):
     MOBILE_USAGE = "You appear to have used a phone!"
 
 
-def is_cheating(duration):
+def is_cheating(duration=10):
     frame_counter = 1
     exam_taker_emb_path = store.get("user_emb_path")
     exam_taker_emb = np.load(exam_taker_emb_path)
-    # Convert the received frame_bytes into a NumPy array
     pubsub = store.pubsub()
     pubsub.subscribe("frame")
+    # Create an empty DataFrame
+    columns = ["Frame Number", "Violation", "Image Path", "Compare Score", "Phone Confidence"]
+    df = pd.DataFrame(columns=columns)
+    log_file_path = os.path.join(app.config["TMP_PATH"], "exam_log.csv")
     for message in pubsub.listen():
         if message["type"] == "message":
+            violation = "Nothing"
             frame_bytes = message["data"]
             image = cv2.imdecode(np.frombuffer(frame_bytes, np.uint8), cv2.IMREAD_COLOR)
-            save_path = os.path.join(app.config["TMP_PATH"], f'original_{frame_counter}.jpg')
+            save_path = os.path.join(app.config["TMP_PATH_LOGS"], f'original_{frame_counter}.jpg')
             cv2.imwrite(save_path, image)
 
             detector = MTCNN()
             # Detect faces in the image
             faces = detector.detect_faces(image)
             if len(faces) == 0:
-                print(ExamViolations.NOT_PRESENT.name)
+                violation = ExamViolations.NOT_PRESENT.name
             elif len(faces) > 1:
-                print(ExamViolations.MORE_PEOPLE.name)
+                violation = ExamViolations.MORE_PEOPLE.name
             else:
                 # Extract face only and turn it into grayscale image
                 face_bbox = faces[0]['box']  # Bounding box of the detected face
@@ -63,20 +71,67 @@ def is_cheating(duration):
                 # Convert the face image to grayscale
                 gray_face_image = cv2.cvtColor(face_image, cv2.COLOR_RGB2GRAY)
                 # Save the grayscale detected face image
-                save_path = os.path.join(app.config["TMP_PATH"], f'detected_face_gray_{frame_counter}.jpg')
-                cv2.imwrite(save_path, gray_face_image)
+                save_path_gray = os.path.join(app.config["TMP_PATH"], f'detected_face_gray_{frame_counter}.jpg')
+                cv2.imwrite(save_path_gray, gray_face_image)
                 frame_counter = frame_counter + 1
 
-                face_emb = generate_face_embedding(save_path)
+                face_emb = generate_face_embedding(save_path_gray)
 
                 score = compare_embeddings(face_emb, exam_taker_emb)
-
-                if (score < 0.8):
-                    print(ExamViolations.NOT_SAME_PERSON.name, f" with score of {score}")
+                detection_confidence = 0
+                if (score < 0.6):
+                    violation = ExamViolations.NOT_SAME_PERSON.name
                 else:
                     phone_used_detected, detection_confidence = detect_phone_used(image)
                     if phone_used_detected:
-                        print(ExamViolations.MOBILE_USAGE.name)
+                        violation = ExamViolations.MOBILE_USAGE.name
+                # Append the log entry directly to the DataFrame
+                log_entry = [frame_counter, violation, save_path, score, detection_confidence]
+
+                if violation is not "Nothing":
+                    df = df.append(pd.Series(log_entry, index=columns), ignore_index=True)
+            if not pubsub.get_message():
+                print("KEMELNA GOING TO END EVERYTHING")
+                break
+    df.to_csv(log_file_path, index=False)
+    send_logs()
+
+
+def send_logs():
+    # Email configuration
+    smtp_server = 'smtp.gmail.com'
+    smtp_port = 587
+    smtp_username = 'noreply.examlogs@gmail.com'
+    smtp_password = 'vjseoyajruazqdes'
+
+    sender_email = 'noreply.examlogs@gmail.com'
+    recipient_email = 'a.merah@esi-sba.dz'
+
+    # Create the email message
+    msg = EmailMessage()
+    msg['From'] = sender_email
+    msg['To'] = recipient_email
+    msg['Subject'] = 'Exam logs'
+
+    # Email body text
+    student_email = store.get("user_email")
+    body = f"Student with following email {student_email} passed the exam successfully. Check possible violations in the attached log file."
+    msg.set_content(body)
+
+    # Attach the log file
+    log_file_path = os.path.join(app.config["TMP_PATH"], "exam_log.csv")
+    with open(log_file_path, 'rb') as log_file:
+        msg.add_attachment(log_file.read(), maintype='application', subtype='octet-stream',
+                           filename=os.path.basename(log_file_path))
+
+    try:
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_username, smtp_password)
+            server.send_message(msg)
+        print("Email sent successfully.")
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
 
 
 def detect_phone_used(image):
@@ -110,6 +165,31 @@ def detect_phone_used(image):
                 detection_confidence = confidence
 
     return phone_used_detected, detection_confidence
+
+
+def clear_tmp():
+    # Define the directory path
+    tmp_path = app.config['TMP_PATH']
+
+    # Remove all files and directories in TMP_PATH
+    try:
+        for item in os.listdir(tmp_path):
+            item_path = os.path.join(tmp_path, item)
+            if os.path.isdir(item_path):
+                shutil.rmtree(item_path)
+            else:
+                os.remove(item_path)
+        print(f"Cleared directory: {tmp_path}")
+    except Exception as e:
+        print(f"An error occurred while clearing the directory: {str(e)}")
+
+    # Create an empty directory called "logs"
+    logs_directory = os.path.join(tmp_path, "logs")
+    try:
+        os.makedirs(logs_directory)
+        print(f"Created empty 'logs' directory at: {logs_directory}")
+    except Exception as e:
+        print(f"An error occurred while creating the 'logs' directory: {str(e)}")
 
 
 def validate_and_save_face(image_path):

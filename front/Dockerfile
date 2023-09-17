@@ -7,4 +7,4 @@ COPY home_exam.jpg .
 RUN mkdir "pages"
 COPY pages/ pages/
 EXPOSE 8501:8501
-ENTRYPOINT ["streamlit","run"]
+ENTRYPOINT ["streamlit","run","home.py"]

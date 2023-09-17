@@ -7,7 +7,7 @@ from marshmallow import ValidationError
 import crud
 from schemas import StudentSchema, StudentCredentials
 from service import save_image, generate_face_embedding, save_face_embedding, compare_embeddings, \
-    face_emb_retrieval, validate_and_save_face, is_cheating
+    face_emb_retrieval, validate_and_save_face, is_cheating, clear_tmp
 
 bp = Blueprint('api', __name__)
 
@@ -45,11 +45,12 @@ def authenticate():
 
     score = compare_embeddings(emb_auth, emb_original)
     print(f'score of face comparison for login is {score}')
-    if (score < 0.8):
+    if (score < 0.75):
         return jsonify("Only the person could pass his exam"), 403
 
     store = redis.Redis(host='localhost', port=6379, db=0)
     store.set("user_emb_path", emb_path)
+    store.set("user_email", email.replace("'", ""))
 
     return jsonify("Authenticated"), 200
 
@@ -102,6 +103,7 @@ def take_exam():
 
     process = Process(target=is_cheating, args=(duration,))
     process.start()
+    clear_tmp()
 
     return jsonify({'message': 'Exam Monitoring started!'}), 201
 

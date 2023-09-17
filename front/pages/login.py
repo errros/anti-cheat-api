@@ -48,7 +48,7 @@ def login():
                     'image': ('image.jpg', picture.getvalue(), 'image/jpeg')
                 }
 
-                response = requests.get('http://127.0.0.1:5000/api/auth', data=payload, files=files)
+                response = requests.get('http://localhost:5000/api/auth', data=payload, files=files)
                 if response.status_code == 200:
                     switch_page("exam")
                 else:

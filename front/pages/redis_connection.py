@@ -1,5 +1,6 @@
 import redis
 
+
 class RedisConnection:
     _instance = None
 
@@ -13,7 +14,6 @@ class RedisConnection:
         # Connect to Redis server
         self.connection = redis.Redis(host='localhost', port=6379, db=0)
         print("Connected to Redis server.")
-
 
     def get_connection(cls):
         return cls.connection

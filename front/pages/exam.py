@@ -28,11 +28,15 @@ from streamlit_webrtc import webrtc_streamer
 
 global store
 global sio
+
 exam_started = False
+exam_cont = True
+a = 0
 
 
 def captured_pic(frame: av.VideoFrame):
     global exam_started  # Declare the global variable
+    global a
     if not exam_started:
         payload = {
             "exam_duration": 2
@@ -40,21 +44,28 @@ def captured_pic(frame: av.VideoFrame):
         response = requests.post("http://localhost:5000/api/monitor", data=payload)
         if response.status_code == 201:
             exam_started = True
-
-    image = frame.to_image()
-    # Convert the image to bytes
-    image_bytes = io.BytesIO()
-    image.save(image_bytes, format='JPEG')
-    image_data = image_bytes.getvalue()
-    store.get_connection().publish("frame", image_data)
+    if a <= 50:
+        image = frame.to_image()
+        # Convert the image to bytes
+        image_bytes = io.BytesIO()
+        image.save(image_bytes, format='JPEG')
+        image_data = image_bytes.getvalue()
+        store.get_connection().publish("frame", image_data)
+        a += 1
+        print(f'frame number {str(a)}')
+    else:
+        exam_cont = False
 
 
 def monitor():
     st.title("Exam Surveillance!")
+    a = 0
+
     webrtc_streamer(key="stream",
-                    desired_playing_state=True,
+                    desired_playing_state=exam_cont,
                     media_stream_constraints={"video": {"frameRate": 1.0}, "audio": False},
-                    video_frame_callback=captured_pic)
+                    video_frame_callback=captured_pic
+                    )
 
 
 if __name__ == "__main__":

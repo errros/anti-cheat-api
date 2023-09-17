@@ -1,7 +1,13 @@
 FROM python:3.7.16
 WORKDIR /src/
 COPY requirements.txt .
-RUN /bin/bash -c "pip install -r requirements.txt"
+
+
+# Install system dependencies (including the missing libgl1-mesa-glx)
+RUN apt-get update && apt-get install -y libgl1-mesa-glx
+
+RUN /bin/bash -c "pip install --no-cache-dir -r requirements.txt"
+
 
 COPY settings.py .
 COPY service.py .
@@ -11,11 +17,10 @@ COPY routes.py .
 COPY models.py .
 COPY crud.py .
 
+ENV QT_X11_NO_MITSHM=1
+
+
 RUN mkdir "static"
-RUN mkdir "static/db"
-RUN mkdir "static/embeddings"
-RUN mkdir "static/ml"
-RUN mkdir "static/tmp"
 
 EXPOSE 5000:5000
 

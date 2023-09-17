@@ -71,7 +71,7 @@ def register():
                     'image': ('image.jpg', picture.getvalue(), 'image/jpeg')
                 }
 
-                response = requests.post('http://127.0.0.1:5000/api/student', data=payload, files=files)
+                response = requests.post('http://localhost/api/student', data=payload, files=files)
                 if response.status_code == 201:
                     alert.info(response.text)
                     time.sleep(2)
